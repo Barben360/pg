@@ -85,6 +85,9 @@ func (tx *Tx) Begin() (*Tx, error) {
 func (tx *Tx) RunInTransaction(ctx context.Context, fn func(*Tx) error) error {
 	defer func() {
 		if err := recover(); err != nil {
+			if err, ok := err.(error); ok {
+				ctx = healthyContext(ctx, err)
+			}
 			if err := tx.RollbackContext(ctx); err != nil {
 				internal.Logger.Printf(ctx, "tx.Rollback panicked: %s", err)
 			}
@@ -93,7 +96,7 @@ func (tx *Tx) RunInTransaction(ctx context.Context, fn func(*Tx) error) error {
 	}()
 
 	if err := fn(tx); err != nil {
-		if err := tx.RollbackContext(ctx); err != nil {
+		if err := tx.RollbackContext(healthyContext(ctx, err)); err != nil {
 			internal.Logger.Printf(ctx, "tx.Rollback failed: %s", err)
 		}
 		return err
@@ -385,4 +388,12 @@ func (tx *Tx) close() {
 
 func (tx *Tx) closed() bool {
 	return atomic.LoadInt32(&tx._closed) == 1
+}
+
+func healthyContext(ctx context.Context, err error) context.Context {
+	switch err {
+	case context.Canceled, context.DeadlineExceeded:
+		return context.Background()
+	}
+	return ctx
 }
